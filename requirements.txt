@@ -1,0 +1,15 @@
+# Philadelphia Biotech Calendar - Python Dependencies
+
+# Required for Excel file support
+openpyxl>=3.0.0
+
+# Standard library packages (no install needed):
+# - csv: CSV file parsing
+# - datetime: Date/time handling  
+# - pathlib: File path operations
+# - hashlib: Event UID generation
+# - re: Regular expressions for time parsing
+# - zoneinfo: Timezone support (Python 3.9+)
+# - configparser: Config file parsing
+# - subprocess: Running subprocesses
+# - shutil: File operations

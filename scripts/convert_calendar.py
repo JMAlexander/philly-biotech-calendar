@@ -1,15 +1,26 @@
 #!/usr/bin/env python3
 """
-Simple CSV to ICS Calendar Converter
-Converts Philadelphia Life Sciences events from CSV to iCalendar format
+Calendar Converter - CSV/Excel to ICS
+Converts Philadelphia Life Sciences events from CSV or Excel to iCalendar format
+Supports:
+- CSV files with standard format
+- Excel files with multiple month sheets
 """
 
 import csv
+import sys
 from datetime import datetime
 from pathlib import Path
 import hashlib
 import re
 from zoneinfo import ZoneInfo
+
+# Import Excel parser (will use only if Excel file is provided)
+try:
+    from excel_parser import ExcelParser
+    EXCEL_SUPPORT = True
+except ImportError:
+    EXCEL_SUPPORT = False
 
 
 def parse_date(date_str):
@@ -113,14 +124,38 @@ def generate_uid(event):
     return hashlib.md5(content.encode()).hexdigest() + "@phillybiotech.cal"
 
 
-def csv_to_ics(csv_file, ics_file, timezone='America/New_York'):
-    """Convert CSV file to ICS calendar format"""
+def parse_input_file(input_file: Path) -> list:
+    """
+    Parse input file (CSV or Excel) and return list of events
     
+    Args:
+        input_file: Path to input file (CSV or Excel)
+        
+    Returns:
+        List of event dictionaries
+    """
+    file_ext = input_file.suffix.lower()
+    
+    if file_ext == '.csv':
+        return parse_csv(input_file)
+    elif file_ext in ['.xlsx', '.xls']:
+        if not EXCEL_SUPPORT:
+            print("Error: Excel support not available. Install openpyxl:")
+            print("  pip install openpyxl")
+            sys.exit(1)
+        return parse_excel(input_file)
+    else:
+        print(f"Error: Unsupported file type: {file_ext}")
+        print("Supported types: .csv, .xlsx, .xls")
+        sys.exit(1)
+
+
+def parse_csv(csv_file: Path) -> list:
+    """Parse CSV file and return list of events"""
     events = []
     
-    # Read CSV
-    print(f"Reading {csv_file}...")
-    with open(csv_file, 'r', encoding='utf-8-sig') as f:  # utf-8-sig handles BOM
+    print(f"Reading CSV file: {csv_file}")
+    with open(csv_file, 'r', encoding='utf-8-sig') as f:
         reader = csv.DictReader(f)
         for row in reader:
             # Skip empty rows
@@ -137,6 +172,70 @@ def csv_to_ics(csv_file, ics_file, timezone='America/New_York'):
                 'location': row.get('Location', row.get('location', '')).strip().strip('"'),
                 'link': row.get('Link', row.get('link', '')).strip()
             })
+    
+    return events
+
+
+def parse_excel(excel_file: Path) -> list:
+    """Parse Excel file and return list of events"""
+    print(f"Reading Excel file: {excel_file}")
+    parser = ExcelParser(excel_file)
+    return parser.parse()
+
+
+def export_to_csv(events: list, csv_file: Path) -> None:
+    """
+    Export events to CSV file
+    
+    Args:
+        events: List of event dictionaries
+        csv_file: Path to output CSV file
+    """
+    if not events:
+        return
+    
+    # Ensure output directory exists
+    csv_file.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Write CSV
+    with open(csv_file, 'w', encoding='utf-8', newline='') as f:
+        fieldnames = ['Start Date', 'End Date', 'Time', 'Event Title', 'Organizer(s)', 'Location', 'Link']
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        
+        writer.writeheader()
+        for event in events:
+            writer.writerow({
+                'Start Date': event['start_date'],
+                'End Date': event['end_date'],
+                'Time': event['time'],
+                'Event Title': event['title'],
+                'Organizer(s)': event['organizer'],
+                'Location': event['location'],
+                'Link': event['link']
+            })
+    
+    print(f"Exported CSV: {csv_file}")
+
+
+def convert_to_ics(input_file, ics_file, timezone='America/New_York', export_csv=True):
+    """
+    Convert CSV or Excel file to ICS calendar format
+    
+    Args:
+        input_file: Path to input file (CSV or Excel)
+        ics_file: Path to output ICS file
+        timezone: Timezone for calendar (default: America/New_York)
+        export_csv: If True and input is Excel, also export CSV (default: True)
+    """
+    input_path = Path(input_file)
+    
+    # Parse input file (CSV or Excel)
+    events = parse_input_file(input_path)
+    
+    # If input is Excel and export_csv is True, also export CSV
+    if export_csv and input_path.suffix.lower() in ['.xlsx', '.xls']:
+        csv_output = Path(ics_file).parent / 'philly_biotech_events.csv'
+        export_to_csv(events, csv_output)
     
     total_events = len(events)
     print(f"Found {total_events} events")
@@ -235,20 +334,19 @@ def csv_to_ics(csv_file, ics_file, timezone='America/New_York'):
         
         ics_lines.append(f"SUMMARY:{escape_ics(event['title'])}")
         
-        # Build description
-        desc_parts = []
+        # Build description (notes/details) - only include organizer
         if event['organizer']:
-            desc_parts.append(f"Organizer: {event['organizer']}")
-        if event['time']:
-            desc_parts.append(f"Time: {event['time']}")
-        if event['link'] and event['link'].lower() not in ['link', 'invite only', 'to be released']:
-            desc_parts.append(f"More info: {event['link']}")
-        
-        if desc_parts:
-            ics_lines.append(f"DESCRIPTION:{escape_ics(' | '.join(desc_parts))}")
+            ics_lines.append(f"DESCRIPTION:Organizer: {escape_ics(event['organizer'])}")
         
         if event['location']:
             ics_lines.append(f"LOCATION:{escape_ics(event['location'])}")
+        
+        # Add URL field if we have a valid link
+        if event['link'] and event['link'].lower() not in ['link', 'invite only', 'to be released', '']:
+            link = event['link'].strip()
+            # Only add if it's an actual URL (not just placeholder text)
+            if link.startswith('http://') or link.startswith('https://'):
+                ics_lines.append(f"URL:{link}")
         
         ics_lines.append("STATUS:CONFIRMED")
         ics_lines.append("END:VEVENT")
@@ -268,8 +366,22 @@ def csv_to_ics(csv_file, ics_file, timezone='America/New_York'):
 
 
 if __name__ == "__main__":
-    csv_to_ics(
-        csv_file='data/2026_philly_lifescience_calendar.csv',
-        ics_file='output/philly_biotech_calendar.ics',
-        timezone='America/New_York'
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='Convert CSV/Excel to ICS calendar format')
+    parser.add_argument('input_file', nargs='?', 
+                       default='data/2026_philly_lifescience_calendar.csv',
+                       help='Input file (CSV or Excel)')
+    parser.add_argument('output_file', nargs='?',
+                       default='output/philly_biotech_calendar.ics',
+                       help='Output ICS file')
+    parser.add_argument('--timezone', default='America/New_York',
+                       help='Timezone (default: America/New_York)')
+    
+    args = parser.parse_args()
+    
+    convert_to_ics(
+        input_file=args.input_file,
+        ics_file=args.output_file,
+        timezone=args.timezone
     )

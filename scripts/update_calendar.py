@@ -28,9 +28,10 @@ def log_message(message, log_file=None, timezone='America/New_York'):
 
 
 def main():
-    # Get script directory
+    # Get script directory and project root
     script_dir = Path(__file__).parent
-    config_file = script_dir / 'config.ini'
+    project_root = script_dir.parent
+    config_file = project_root / 'config' / 'config.ini'
     
     # Read config
     if not config_file.exists():
@@ -40,30 +41,34 @@ def main():
     config = configparser.ConfigParser()
     config.read(config_file)
     
-    # Get settings
-    csv_file = script_dir / config['Paths']['csv_file']
-    output_file = script_dir / config['Paths']['output_file']
+    # Get settings (paths relative to project root)
+    input_file = project_root / config['Paths']['input_file']
+    output_file = project_root / config['Paths']['output_file']
     web_destination = Path(config['Paths']['web_destination'])
     timezone = config['Calendar']['timezone']
     create_backup = config['Options']['create_backup'].lower() == 'yes'
-    log_file = script_dir / config['Options']['log_file']
+    log_file = project_root / config['Options']['log_file']
     
     log_message("=" * 60, log_file, timezone)
     log_message(f"Starting calendar update (timezone: {timezone})", log_file, timezone)
     
-    # Step 1: Check if CSV file exists
-    if not csv_file.exists():
-        log_message(f"Error: CSV file not found: {csv_file}", log_file, timezone)
+    # Step 1: Check if input file exists
+    if not input_file.exists():
+        log_message(f"Error: Input file not found: {input_file}", log_file, timezone)
         sys.exit(1)
     
-    log_message(f"Found CSV file: {csv_file}", log_file, timezone)
+    log_message(f"Found input file: {input_file}", log_file, timezone)
     
     # Step 2: Run convert_calendar.py
     log_message("Running conversion...", log_file, timezone)
+    
+    # Use the same Python interpreter that's running this script
+    python_exe = sys.executable
+    
     try:
         result = subprocess.run(
-            [sys.executable, str(script_dir / 'convert_calendar.py')],
-            cwd=script_dir,
+            [python_exe, str(script_dir / 'convert_calendar.py'), str(input_file), str(output_file)],
+            cwd=project_root,
             capture_output=True,
             text=True
         )
